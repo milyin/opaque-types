@@ -1,9 +1,9 @@
 # opaque-types
 
 `opaque-types` generates Rust structs with the size and alignment of types from
-another crate. It is intended for build scripts that need a layout-compatible,
-fieldless representation—for example, when exposing a Rust value by value
-through an FFI generator.
+another crate. It is intended for build scripts that need layout-compatible
+opaque storage—for example, when exposing a Rust value by value through an FFI
+generator.
 
 The layout must be measured for the compilation target, not the machine running
 `build.rs`. `opaque-types` creates a probe crate, builds it for Cargo's `TARGET`,
@@ -36,17 +36,17 @@ opaque-types = "0.1"
 Call it from `build.rs`:
 
 ```rust,no_run
-fn main() -> anyhow::Result<()> {
+fn main() {
     let generated = opaque_types::OpaqueTypes::new("../model")
         .features(["shared-memory", "unstable"])
         .default_features(false)
         .add("model::Message", "message_t")
         .add("model::Header", "header_t")
-        .generate()?;
+        .generate()
+        .expect("generate opaque types");
 
     // `generate` also writes `$OUT_DIR/opaque_probe/opaque_types.rs`.
     println!("generated {} bytes", generated.len());
-    Ok(())
 }
 ```
 
