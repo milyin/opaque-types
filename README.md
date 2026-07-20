@@ -38,12 +38,7 @@ Call it from `build.rs`:
 
 ```rust,no_run
 use std::path::PathBuf;
-
-macro_rules! pq {
-    ($($tokens:tt)*) => {
-        syn::parse_quote!($($tokens)*)
-    };
-}
+use syn::parse_quote as pq;
 
 let destination = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR is set"))
     .join("opaque_types.rs");
@@ -72,8 +67,8 @@ opaque_types::OpaqueTypes::new("../model")
 - `add(rust_type, opaque_type)` takes two `syn::Type` values. `rust_type` must be
   resolvable from the probe crate, such as `model::Message` or
   `model::Container<u32>`. `opaque_type` must be one unqualified Rust identifier,
-  such as `message_t`. The example's `pq!` macro is a shorthand around
-  `syn::parse_quote!` for constructing both values.
+  such as `message_t`. The example imports `syn::parse_quote!` as `pq!` for
+  constructing both values concisely.
 - `cargo_lock(path)` selects the `Cargo.lock` copied into the probe. By default,
   the lockfile comes from the workspace consuming this external crate through
   [`get-cargo-lock`](https://crates.io/crates/get-cargo-lock).
