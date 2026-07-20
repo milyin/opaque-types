@@ -36,18 +36,16 @@ opaque-types = "0.1"
 Call it from `build.rs`:
 
 ```rust,no_run
-fn main() {
-    let generated = opaque_types::OpaqueTypes::new("../model")
-        .features(["shared-memory", "unstable"])
-        .default_features(false)
-        .add("model::Message", "message_t")
-        .add("model::Header", "header_t")
-        .generate()
-        .expect("generate opaque types");
+let generated = opaque_types::OpaqueTypes::new("../model")
+    .features(["shared-memory", "unstable"])
+    .default_features(false)
+    .add("model::Message", "message_t")
+    .add("model::Header", "header_t")
+    .generate()
+    .expect("generate opaque types");
 
-    // `generate` also writes `$OUT_DIR/opaque_probe/opaque_types.rs`.
-    println!("generated {} bytes", generated.len());
-}
+// `generate` also writes `$OUT_DIR/opaque_probe/opaque_types.rs`.
+println!("generated {} bytes", generated.len());
 ```
 
 ## Parameters
