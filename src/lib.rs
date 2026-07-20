@@ -72,13 +72,16 @@ impl OpaqueTypes {
         self
     }
 
-    /// Adds a source Rust type expression and the identifier of its generated
-    /// opaque struct.
+    /// Adds a source Rust type and its generated opaque struct type.
     ///
-    /// The type must be resolvable from the probe crate, for example
-    /// `"model::Container<u32>"`. `opaque_name` must be one Rust identifier.
-    pub fn add(mut self, rust_type: impl Into<String>, opaque_name: impl Into<String>) -> Self {
-        self.types.push(OpaqueType::new(rust_type, opaque_name));
+    /// `rust_type` must be resolvable from the probe crate. `opaque_type` must
+    /// contain one unqualified Rust identifier.
+    pub fn add(mut self, rust_type: syn::Type, opaque_type: syn::Type) -> Self {
+        use quote::ToTokens;
+        self.types.push(OpaqueType::new(
+            rust_type.to_token_stream().to_string(),
+            opaque_type.to_token_stream().to_string(),
+        ));
         self
     }
 
@@ -96,9 +99,17 @@ impl OpaqueTypes {
         self
     }
 
-    /// Probe each type's `$TARGET` size/alignment and return the generated
-    /// opaque-struct Rust source (also written to `<build_dir>/opaque_types.rs`).
-    pub fn generate(&self) -> Result<String> {
+    /// Probes every requested type and writes the generated Rust source to
+    /// `destination`.
+    ///
+    /// The destination is written only after every requested type's size and
+    /// alignment has been read successfully. Failure to build or inspect any
+    /// requested type returns an error and leaves an existing destination file
+    /// unchanged.
+    pub fn generate(&self, destination: impl AsRef<Path>) -> Result<()> {
+        if self.types.is_empty() {
+            bail!("no opaque types were requested");
+        }
         let build_dir = self
             .build_dir
             .clone()
@@ -117,10 +128,14 @@ impl OpaqueTypes {
                 .with_context(|| format!("probing align of `{}`", t.rust_path))?;
             out.push_str(&render_opaque(&t.opaque_name, size, align));
         }
-        let out_path = build_dir.join("opaque_types.rs");
-        std::fs::write(&out_path, &out)
-            .with_context(|| format!("writing {}", out_path.display()))?;
-        Ok(out)
+        let destination = destination.as_ref();
+        if let Some(parent) = destination.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating destination directory {}", parent.display()))?;
+        }
+        std::fs::write(destination, out)
+            .with_context(|| format!("writing {}", destination.display()))?;
+        Ok(())
     }
 }
 
@@ -400,7 +415,10 @@ mod tests {
     fn features_are_explicit_and_independent_of_defaults() {
         let b = OpaqueTypes::new("source")
             .features(["unstable", "shared-memory"])
-            .add("model::Message", "message_t");
+            .add(
+                syn::parse_quote!(model::Message),
+                syn::parse_quote!(message_t),
+            );
         assert_eq!(b.features, vec!["unstable", "shared-memory"]);
         assert!(!b.no_default_features);
         assert_eq!(b.types.len(), 1);
@@ -457,15 +475,53 @@ mod tests {
         let lockfile = source.join("Cargo.lock");
         std::fs::write(&lockfile, "version = 4\n")?;
 
-        let generated = OpaqueTypes::new(&source)
+        let destination = temporary.path().join("generated/opaque_types.rs");
+        OpaqueTypes::new(&source)
             .cargo_lock(lockfile)
             .build_dir(temporary.path().join("probe"))
-            .add("layout_model::Value", "opaque_value_t")
-            .generate()?;
+            .add(
+                syn::parse_quote!(layout_model::Value),
+                syn::parse_quote!(opaque_value_t),
+            )
+            .generate(&destination)?;
 
+        let generated = std::fs::read_to_string(destination)?;
         assert!(generated.contains("#[repr(C, align(16))]"));
         assert!(generated.contains("pub struct opaque_value_t"));
         assert!(generated.contains("pub _0: [u8; 16]"));
+        Ok(())
+    }
+
+    #[test]
+    fn failed_probe_does_not_replace_destination() -> Result<()> {
+        let temporary = tempfile::tempdir()?;
+        let source = temporary.path().join("model");
+        std::fs::create_dir_all(source.join("src"))?;
+        std::fs::write(
+            source.join("Cargo.toml"),
+            "[package]\nname = \"layout-model\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+        )?;
+        std::fs::write(source.join("src/lib.rs"), "pub struct Value;\n")?;
+        let lockfile = source.join("Cargo.lock");
+        std::fs::write(&lockfile, "version = 4\n")?;
+        let destination = temporary.path().join("opaque_types.rs");
+        std::fs::write(&destination, "existing output\n")?;
+
+        let result = OpaqueTypes::new(&source)
+            .cargo_lock(lockfile)
+            .build_dir(temporary.path().join("probe"))
+            .add(
+                syn::parse_quote!(layout_model::Value),
+                syn::parse_quote!(opaque_value_t),
+            )
+            .add(
+                syn::parse_quote!(layout_model::Missing),
+                syn::parse_quote!(missing_t),
+            )
+            .generate(&destination);
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read_to_string(destination)?, "existing output\n");
         Ok(())
     }
 }

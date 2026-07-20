@@ -31,21 +31,30 @@ Add `opaque-types` as a build dependency:
 ```toml
 [build-dependencies]
 opaque-types = "0.1"
+syn = { version = "2", features = ["full"] }
 ```
 
 Call it from `build.rs`:
 
 ```rust,no_run
-let generated = opaque_types::OpaqueTypes::new("../model")
+use std::path::PathBuf;
+
+macro_rules! pq {
+    ($($tokens:tt)*) => {
+        syn::parse_quote!($($tokens)*)
+    };
+}
+
+let destination = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR is set"))
+    .join("opaque_types.rs");
+
+opaque_types::OpaqueTypes::new("../model")
     .features(["shared-memory", "unstable"])
     .default_features(false)
-    .add("model::Message", "message_t")
-    .add("model::Header", "header_t")
-    .generate()
+    .add(pq!(model::Message), pq!(message_t))
+    .add(pq!(model::Header), pq!(header_t))
+    .generate(destination)
     .expect("generate opaque types");
-
-// `generate` also writes `$OUT_DIR/opaque_probe/opaque_types.rs`.
-println!("generated {} bytes", generated.len());
 ```
 
 ## Parameters
@@ -60,15 +69,19 @@ println!("generated {} bytes", generated.len());
 - `default_features(bool)` controls the probe dependency's Cargo
   `default-features` setting. It is independent of `features` and defaults to
   `true`.
-- `add(rust_type, opaque_name)` maps a Rust type expression resolvable from the
-  probe crate, such as `"model::Message"` or `"model::Container<u32>"`, to one
-  valid Rust identifier used for the generated struct, such as `"message_t"`.
+- `add(rust_type, opaque_type)` takes two `syn::Type` values. `rust_type` must be
+  resolvable from the probe crate, such as `model::Message` or
+  `model::Container<u32>`. `opaque_type` must be one unqualified Rust identifier,
+  such as `message_t`. The example's `pq!` macro is a shorthand around
+  `syn::parse_quote!` for constructing both values.
 - `cargo_lock(path)` selects the `Cargo.lock` copied into the probe. By default,
   the lockfile comes from the workspace consuming this external crate through
   [`get-cargo-lock`](https://crates.io/crates/get-cargo-lock).
 - `build_dir(path)` selects the disposable probe directory. It defaults to
-  `$OUT_DIR/opaque_probe`. `generate()` also writes the returned source to
-  `<build_dir>/opaque_types.rs`.
+  `$OUT_DIR/opaque_probe`.
+- `generate(destination)` probes every mapping and writes the generated Rust
+  source to that path. It returns `Result<()>`; any failed type probe returns an
+  error before the destination is written.
 
 ## Configure the consuming workspace
 
@@ -83,9 +96,9 @@ cargo check
 ```
 
 This injects the workspace-local `get-cargo-lock` proxy used by the default
-lockfile lookup. Without that setup, `generate()` fails with explanatory setup
-instructions. A caller that supplies `cargo_lock(path)` explicitly does not use
-the default lookup.
+lockfile lookup. Without that setup, `generate(destination)` fails with
+explanatory setup instructions. A caller that supplies `cargo_lock(path)`
+explicitly does not use the default lookup.
 
 The probe is built with `--offline` and an isolated target directory. This keeps
 its dependency resolution tied to the selected lockfile and avoids Cargo target
